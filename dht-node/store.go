@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -38,7 +39,7 @@ func (s *Store) Get(key string) ([]byte, bool) {
 func (s *Store) save() error {
 	tmp := make(map[string]string, len(s.data))
 	for k, v := range s.data {
-		tmp[k] = string(v)
+		tmp[k] = base64.StdEncoding.EncodeToString(v)
 	}
 	f, err := os.Create(s.file)
 	if err != nil {
@@ -59,7 +60,11 @@ func (s *Store) Load() error {
 		return err
 	}
 	for k, v := range tmp {
-		s.data[k] = []byte(v)
+		decoded, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
+			return err
+		}
+		s.data[k] = decoded
 	}
 	return nil
 }

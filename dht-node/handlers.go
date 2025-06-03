@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -64,8 +66,9 @@ func findNodeHandler(pl *PeerList, selfID string) http.HandlerFunc {
 }
 
 type PutRequest struct {
-	Key   string `json:"key"`
-	Value string `json:"value"` // base64 encoded
+	Key   string `json:"key,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Value string `json:"value"`
 }
 
 type PutResponse struct {
@@ -86,28 +89,33 @@ func putContentHandler(store *Store, pl *PeerList, selfID string) http.HandlerFu
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		key := req.Key
+		if key == "" && req.Name != "" {
+			h := sha1.Sum([]byte(req.Name))
+			key = hex.EncodeToString(h[:])
+		}
 		val, err := base64.StdEncoding.DecodeString(req.Value)
-		if err != nil {
+		if err != nil || key == "" {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		// Find the closest peer to the key (including self)
-		closest := pl.closestPeers(req.Key, 1, "")
+		closest := pl.closestPeers(key, 1, "")
 		isSelfClosest := len(closest) == 0 || closest[0].NodeID == selfID
 		if isSelfClosest {
-			log.Printf("[DHT] Storing key %s locally (self is closest)", req.Key)
-			if err := store.Put(req.Key, val); err != nil {
+			log.Printf("[DHT] Storing key %s locally (self is closest)", key)
+			if err := store.Put(key, val); err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(PutResponse{Key: req.Key})
+			json.NewEncoder(w).Encode(PutResponse{Key: key})
 			return
 		}
 		// Forward to closest peer
 		peer := closest[0]
-		log.Printf("[DHT] Forwarding PUT for key %s to peer %s at %s", req.Key, peer.NodeID, peer.Address)
-		forwardReq := PutRequest{Key: req.Key, Value: req.Value}
+		log.Printf("[DHT] Forwarding PUT for key %s to peer %s at %s", key, peer.NodeID, peer.Address)
+		forwardReq := PutRequest{Key: req.Key, Name: req.Name, Value: req.Value}
 		buf, _ := json.Marshal(forwardReq)
 		url := fmt.Sprintf("http://%s/put", peer.Address)
 		resp, err := http.Post(url, "application/json", bytes.NewReader(buf))
@@ -127,6 +135,11 @@ func putContentHandler(store *Store, pl *PeerList, selfID string) http.HandlerFu
 func getContentHandler(store *Store, pl *PeerList, selfID string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := r.URL.Query().Get("key")
+		name := r.URL.Query().Get("name")
+		if key == "" && name != "" {
+			h := sha1.Sum([]byte(name))
+			key = hex.EncodeToString(h[:])
+		}
 		if key == "" {
 			w.WriteHeader(http.StatusBadRequest)
 			return
