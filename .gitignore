@@ -26,5 +26,5 @@ bin/
 *.swp
 
 # Persistent store files
-store.json
-namemap.json
+store*.json
+namemap*.json
